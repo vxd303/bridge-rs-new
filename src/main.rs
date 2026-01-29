@@ -50,7 +50,10 @@ fn start_browser() {
 
 async fn handle_websocket(ws: WebSocket) {
     let (mut ws_writer, mut ws_reader) = ws.split();
-    let (mut adb_reader, mut adb_writer) = adb::connect_or_start().await.unwrap().into_split();
+    let adb_stream = adb::connect_or_start().await.unwrap();
+    // Reduce latency for small writes.
+    let _ = adb_stream.set_nodelay(true);
+    let (mut adb_reader, mut adb_writer) = adb_stream.into_split();
 
     let (ws_to_adb_sender, mut ws_to_adb_receiver) = channel::<Bytes>(16);
     let (adb_to_ws_sender, mut adb_to_ws_receiver) = channel::<Vec<u8>>(16);
@@ -72,18 +75,17 @@ async fn handle_websocket(ws: WebSocket) {
                     break;
                 }
             }
-            adb_writer.shutdown().await.unwrap();
+            let _ = adb_writer.shutdown().await;
         },
         async move {
+            let mut buf = vec![0u8; 64 * 1024];
             loop {
-                let mut buf = vec![0; 1024 * 1024];
                 match adb_reader.read(&mut buf).await {
                     Ok(0) | Err(_) => {
                         break;
                     }
                     Ok(n) => {
-                        buf.truncate(n);
-                        if adb_to_ws_sender.send(buf).await.is_err() {
+                        if adb_to_ws_sender.send(buf[..n].to_vec()).await.is_err() {
                             break;
                         }
                     }
@@ -96,7 +98,7 @@ async fn handle_websocket(ws: WebSocket) {
                     break;
                 }
             }
-            ws_writer.close().await.unwrap();
+            let _ = ws_writer.close().await;
         }
     );
 }
