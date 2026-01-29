@@ -90,12 +90,14 @@ async fn hello_status(ip: Ipv4Addr, port: u16, timeout: Duration) -> Option<Hell
 
     let mut stream = tokio::time::timeout(timeout, TcpStream::connect(addr))
         .await
-        .ok()??;
+        .ok()?
+        .ok()?;
 
     // Match python: send b"60\r\n"
     tokio::time::timeout(timeout, stream.write_all(b"60\r\n"))
         .await
-        .ok()??;
+        .ok()?
+        .ok()?;
 
     // Read until newline (max 64 KiB)
     let mut buf = Vec::with_capacity(4096);
@@ -107,7 +109,8 @@ async fn hello_status(ip: Ipv4Addr, port: u16, timeout: Duration) -> Option<Hell
 
         let n = tokio::time::timeout(timeout, stream.read(&mut chunk))
             .await
-            .ok()??;
+            .ok()?
+            .ok()?;
         if n == 0 {
             return None;
         }
