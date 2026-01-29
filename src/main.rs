@@ -29,7 +29,7 @@ use tokio::{
     sync::mpsc::channel,
 };
 use tokio_util::sync::CancellationToken;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{Any, CorsLayer};
 use tray_icon::{
     menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem},
     TrayIconBuilder, TrayIconEvent,
@@ -453,20 +453,12 @@ async fn main() {
 }
 
 fn cors_layer() -> CorsLayer {
+    // Web UI is often hosted on HTTPS but talks to a local bridge
+    // (e.g. https://app.example.com -> http://localhost:15037).
+    // Use permissive CORS here to avoid deployment-specific origin drift.
     CorsLayer::new()
-        .allow_methods([Method::GET, Method::POST])
-        .allow_origin(
-            [
-                "http://localhost:3002",
-                "http://localhost:8000",
-                "http://127.0.0.1:8000",
-                "https://tangoapp.dev",
-                "https://app.tangoapp.dev",
-                "https://beta.tangoapp.dev",
-                "https://tunnel.tangoapp.dev",
-                "https://app.hoadev.online",
-            ]
-            .map(|x| x.parse().unwrap()),
-        )
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_headers(Any)
+        .allow_origin(Any)
         .allow_private_network(true)
 }
