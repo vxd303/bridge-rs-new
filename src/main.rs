@@ -149,6 +149,9 @@ async fn handle_ios_stream(mut ws: WebSocket, ip: String) {
         }
     };
 
+    // Reduce latency for small writes.
+    let _ = stream.set_nodelay(true);
+
     let (mut ws_writer, mut ws_reader) = ws.split();
     let (mut tcp_reader, mut tcp_writer) = stream.into_split();
     let cancel = CancellationToken::new();
@@ -203,6 +206,8 @@ async fn handle_ios_zxtouch(mut ws: WebSocket, ip: String) {
             return;
         }
     };
+
+    let _ = stream.set_nodelay(true);
 
     let (mut ws_writer, mut ws_reader) = ws.split();
     let (mut tcp_reader, mut tcp_writer) = stream.into_split();
