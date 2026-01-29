@@ -175,7 +175,8 @@ async fn handle_ios_stream(mut ws: WebSocket, ip: String) {
     });
 
     let tcp_to_ws = tokio::spawn(async move {
-        let mut buf = vec![0u8; 64 * 1024];
+        // Smaller chunks reduce end-to-end buffering latency.
+        let mut buf = vec![0u8; 8 * 1024];
         loop {
             tokio::select! {
                 _ = cancel_writer.cancelled() => break,
