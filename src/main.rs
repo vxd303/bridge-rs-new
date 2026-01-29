@@ -125,6 +125,20 @@ async fn ios_stream_handler(
     Ok(ws.on_upgrade(move |socket| handle_ios_stream(socket, device.ip)))
 }
 
+async fn ios_zxtouch_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    ws: WebSocketUpgrade,
+) -> Result<Response, Response> {
+    let device = state
+        .registry
+        .get_ios_device(&id)
+        .await
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "device not found").into_response())?;
+
+    Ok(ws.on_upgrade(move |socket| handle_ios_zxtouch(socket, device.ip)))
+}
+
 async fn handle_ios_stream(mut ws: WebSocket, ip: String) {
     let addr = format!("{}:7001", ip);
     let stream = match TcpStream::connect(addr).await {
@@ -178,6 +192,66 @@ async fn handle_ios_stream(mut ws: WebSocket, ip: String) {
 
     let _ = tokio::join!(ws_read_task, tcp_to_ws);
     let _ = tcp_writer.shutdown().await;
+}
+
+async fn handle_ios_zxtouch(mut ws: WebSocket, ip: String) {
+    let addr = format!("{}:6000", ip);
+    let stream = match TcpStream::connect(addr).await {
+        Ok(stream) => stream,
+        Err(_) => {
+            let _ = ws.close().await;
+            return;
+        }
+    };
+
+    let (mut ws_writer, mut ws_reader) = ws.split();
+    let (mut tcp_reader, mut tcp_writer) = stream.into_split();
+    let cancel = CancellationToken::new();
+    let cancel_reader = cancel.clone();
+    let cancel_writer = cancel.clone();
+
+    let ws_to_tcp = tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = cancel_reader.cancelled() => break,
+                message = ws_reader.next() => {
+                    match message {
+                        Some(Ok(Message::Binary(buf))) => {
+                            if tcp_writer.write_all(&buf).await.is_err() { break; }
+                        }
+                        Some(Ok(Message::Text(text))) => {
+                            if tcp_writer.write_all(text.as_bytes()).await.is_err() { break; }
+                        }
+                        Some(Ok(Message::Close(_))) | None => break,
+                        Some(Ok(_)) => {}
+                        Some(Err(_)) => break,
+                    }
+                }
+            }
+        }
+        cancel_reader.cancel();
+    });
+
+    let tcp_to_ws = tokio::spawn(async move {
+        let mut buf = vec![0u8; 64 * 1024];
+        loop {
+            tokio::select! {
+                _ = cancel_writer.cancelled() => break,
+                result = tcp_reader.read(&mut buf) => {
+                    let n = match result {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => n,
+                    };
+                    if ws_writer.send(Message::binary(buf[..n].to_vec())).await.is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+        cancel_writer.cancel();
+    });
+
+    let _ = tokio::join!(ws_to_tcp, tcp_to_ws);
 }
 
 const ARG_AUTO_RUN: &str = "--auto-run";
@@ -274,6 +348,7 @@ async fn main() {
     let app = Router::new()
         .route("/devices", get(list_devices))
         .route("/ios/{id}/stream", get(ios_stream_handler))
+        .route("/ios/{id}/zxtouch", get(ios_zxtouch_handler))
         .nest(
             "/bridge",
             Router::new()
