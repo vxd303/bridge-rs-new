@@ -122,11 +122,11 @@ async fn ios_stream_handler(
         .await
         .ok_or_else(|| (StatusCode::NOT_FOUND, "device not found").into_response())?;
 
-    Ok(ws.on_upgrade(move |socket| handle_ios_stream(socket, device.wifi_ip)))
+    Ok(ws.on_upgrade(move |socket| handle_ios_stream(socket, device.ip)))
 }
 
-async fn handle_ios_stream(mut ws: WebSocket, wifi_ip: String) {
-    let addr = format!("{}:7001", wifi_ip);
+async fn handle_ios_stream(mut ws: WebSocket, ip: String) {
+    let addr = format!("{}:7001", ip);
     let stream = match TcpStream::connect(addr).await {
         Ok(stream) => stream,
         Err(_) => {
@@ -296,7 +296,7 @@ async fn main() {
     let registry = DeviceRegistry::new();
     let ios_provider = IosProvider::new(
         registry.clone(),
-        IosLanScanner::new(Duration::from_millis(500), 64),
+        IosLanScanner::new(Duration::from_millis(600), 64),
         Duration::from_secs(10),
     );
     let _ios_task = ios_provider.start();
@@ -458,10 +458,13 @@ fn cors_layer() -> CorsLayer {
         .allow_origin(
             [
                 "http://localhost:3002",
+                "http://localhost:8000",
+                "http://127.0.0.1:8000",
                 "https://tangoapp.dev",
                 "https://app.tangoapp.dev",
                 "https://beta.tangoapp.dev",
                 "https://tunnel.tangoapp.dev",
+                "https://app.hoadev.online",
             ]
             .map(|x| x.parse().unwrap()),
         )

@@ -5,14 +5,14 @@ use std::{
     time::Duration,
 };
 
-use reqwest::StatusCode;
+use base64::{engine::general_purpose, Engine as _};
+use tokio::{io::AsyncReadExt, io::AsyncWriteExt, net::TcpStream};
 use tokio::sync::Semaphore;
 
-use crate::ios_provider::{DeviceInfoResponse, IosDevice};
+use crate::ios_provider::{HelloStatusPayload, IosDevice};
 
 #[derive(Clone)]
 pub struct IosLanScanner {
-    client: reqwest::Client,
     timeout: Duration,
     concurrency: usize,
 }
@@ -20,7 +20,6 @@ pub struct IosLanScanner {
 impl IosLanScanner {
     pub fn new(timeout: Duration, concurrency: usize) -> Self {
         Self {
-            client: reqwest::Client::new(),
             timeout,
             concurrency,
         }
@@ -38,11 +37,10 @@ impl IosLanScanner {
                 host,
             );
             let permit = semaphore.clone().acquire_owned().await.unwrap();
-            let client = self.client.clone();
             let timeout = self.timeout;
             tasks.push(tokio::spawn(async move {
                 let _permit = permit;
-                probe_device(client, ip, timeout).await
+                probe_device(ip, timeout).await
             }));
         }
 
@@ -67,30 +65,71 @@ pub fn local_ipv4() -> io::Result<Ipv4Addr> {
 }
 
 async fn probe_device(
-    client: reqwest::Client,
     ip: Ipv4Addr,
     timeout: Duration,
 ) -> Option<IosDevice> {
-    let base_url = format!("http://{}", ip);
-    let ping_url = format!("{}/ping", base_url);
+    let payload = hello_status(ip, 6000, timeout).await?;
 
-    let ping = client.get(&ping_url).timeout(timeout).send().await.ok()?;
+    let ip_string = ip.to_string();
+    let display_name = if payload.device.name.is_empty() {
+        ip_string.clone()
+    } else {
+        payload.device.name.clone()
+    };
 
-    if ping.status() != StatusCode::OK {
+    Some(IosDevice {
+        id: format!("ios:{}", ip_string),
+        display_name,
+        ip: ip_string,
+        status: payload,
+    })
+}
+
+async fn hello_status(ip: Ipv4Addr, port: u16, timeout: Duration) -> Option<HelloStatusPayload> {
+    let addr = (ip, port);
+
+    let mut stream = tokio::time::timeout(timeout, TcpStream::connect(addr))
+        .await
+        .ok()??;
+
+    // Match python: send b"60\r\n"
+    tokio::time::timeout(timeout, stream.write_all(b"60\r\n"))
+        .await
+        .ok()??;
+
+    // Read until newline (max 64 KiB)
+    let mut buf = Vec::with_capacity(4096);
+    let mut chunk = [0u8; 4096];
+    loop {
+        if buf.len() > 64 * 1024 {
+            return None;
+        }
+
+        let n = tokio::time::timeout(timeout, stream.read(&mut chunk))
+            .await
+            .ok()??;
+        if n == 0 {
+            return None;
+        }
+
+        buf.extend_from_slice(&chunk[..n]);
+        if buf.iter().any(|b| *b == b'\n') {
+            break;
+        }
+    }
+
+    let newline_pos = buf.iter().position(|b| *b == b'\n')?;
+    let line = &buf[..=newline_pos];
+    let text = String::from_utf8_lossy(line).trim().to_string();
+    if !text.starts_with("0;;") {
         return None;
     }
 
-    let info_url = format!("{}/deviceinfo", base_url);
-    let info = client.get(&info_url).timeout(timeout).send().await.ok()?;
+    let b64 = text.splitn(2, ";;").nth(1)?;
+    let decoded = general_purpose::STANDARD
+        .decode(b64)
+        .or_else(|_| general_purpose::STANDARD_NO_PAD.decode(b64))
+        .ok()?;
 
-    if info.status() != StatusCode::OK {
-        return None;
-    }
-
-    let response: DeviceInfoResponse = info.json().await.ok()?;
-    if response.code != 0 {
-        return None;
-    }
-
-    Some(IosDevice::from(response.data))
+    serde_json::from_slice::<HelloStatusPayload>(&decoded).ok()
 }

@@ -65,8 +65,7 @@ impl DeviceRegistry {
         for (id, device) in incoming {
             let needs_emit = match ios_devices.get(&id) {
                 Some(existing) => {
-                    existing.wifi_ip != device.wifi_ip
-                        || existing.display_name != device.display_name
+                    existing.ip != device.ip || existing.display_name != device.display_name
                 }
                 None => true,
             };
@@ -94,17 +93,12 @@ impl DeviceRegistry {
                 status: "online".to_string(),
                 display_name: device.display_name.clone(),
                 meta: json!({
-                    "devsn": device.devsn,
-                    "zeversion": device.zeversion,
-                    "sysversion": device.sysversion,
-                    "devname": device.devname,
-                    "devmac": device.devmac,
-                    "deviceid": device.deviceid,
-                    "devtype": device.devtype,
-                    "wifi_ip": device.wifi_ip,
-                    "ipaddr": device.ipaddr,
+                    "ip": device.ip,
+                    "device": device.status.device,
+                    "zxtouch": device.status.zxtouch,
+                    "script": device.status.script,
                 }),
-                capabilities: vec!["stream".to_string()],
+                capabilities: vec!["stream_mpegts_ws".to_string(), "zxtouch".to_string()],
             });
         }
 
