@@ -125,7 +125,7 @@ async fn ios_stream_handler(
     Ok(ws.on_upgrade(move |socket| handle_ios_stream(socket, device.wifi_ip)))
 }
 
-async fn handle_ios_stream(ws: WebSocket, wifi_ip: String) {
+async fn handle_ios_stream(mut ws: WebSocket, wifi_ip: String) {
     let addr = format!("{}:7001", wifi_ip);
     let stream = match TcpStream::connect(addr).await {
         Ok(stream) => stream,
