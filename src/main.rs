@@ -124,7 +124,21 @@ async fn ios_stream_handler(
         .await
         .ok_or_else(|| (StatusCode::NOT_FOUND, "device not found").into_response())?;
 
-    Ok(ws.on_upgrade(move |socket| handle_ios_stream(socket, device.ip)))
+    Ok(ws.on_upgrade(move |socket| handle_ios_stream(socket, device.ip, 7001)))
+}
+
+async fn ios_stream_eco_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    ws: WebSocketUpgrade,
+) -> Result<Response, Response> {
+    let device = state
+        .registry
+        .get_ios_device(&id)
+        .await
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "device not found").into_response())?;
+
+    Ok(ws.on_upgrade(move |socket| handle_ios_stream(socket, device.ip, 7002)))
 }
 
 async fn ios_zxtouch_handler(
@@ -141,8 +155,8 @@ async fn ios_zxtouch_handler(
     Ok(ws.on_upgrade(move |socket| handle_ios_zxtouch(socket, device.ip)))
 }
 
-async fn handle_ios_stream(mut ws: WebSocket, ip: String) {
-    let addr = format!("{}:7001", ip);
+async fn handle_ios_stream(mut ws: WebSocket, ip: String, port: u16) {
+    let addr = format!("{}:{}", ip, port);
     let stream = match TcpStream::connect(addr).await {
         Ok(stream) => stream,
         Err(_) => {
@@ -356,6 +370,7 @@ async fn main() {
     let app = Router::new()
         .route("/devices", get(list_devices))
         .route("/ios/{id}/stream", get(ios_stream_handler))
+        .route("/ios/{id}/stream-eco", get(ios_stream_eco_handler))
         .route("/ios/{id}/zxtouch", get(ios_zxtouch_handler))
         .nest(
             "/bridge",
