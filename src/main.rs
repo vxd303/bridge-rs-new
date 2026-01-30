@@ -157,9 +157,9 @@ async fn ios_zxtouch_handler(
 
 async fn handle_ios_stream(mut ws: WebSocket, ip: String, port: u16) {
     let addr = format!("{}:{}", ip, port);
-    let stream = match TcpStream::connect(addr).await {
-        Ok(stream) => stream,
-        Err(_) => {
+    let stream = match tokio::time::timeout(Duration::from_secs(2), TcpStream::connect(addr)).await {
+        Ok(Ok(stream)) => stream,
+        _ => {
             let _ = ws.close().await;
             return;
         }
@@ -413,9 +413,10 @@ async fn main() {
     };
     println!("server started on thread {:?}", thread::current().id());
 
-    if env::args().all(|arg| arg != ARG_AUTO_RUN) {
-        start_browser()
-    }
+    // Temporarily disable auto-opening the website on startup.
+    // if env::args().all(|arg| arg != ARG_AUTO_RUN) {
+    //     start_browser()
+    // }
 
     let menu_open = MenuItem::new("Open", true, None);
 
